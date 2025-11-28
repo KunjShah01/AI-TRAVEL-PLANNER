@@ -60,6 +60,29 @@ class ItineraryRequest(BaseModel):
     hotels: str
     activities: Optional[List[str]] = []
     
+class BudgetRequest(BaseModel):
+    flight_price: Optional[str] = None
+    hotel_price_per_night: Optional[str] = None
+    nights: int = 1
+    passengers: int = 1
+    daily_budget: Optional[float] = None
+    currency: str = "USD"
+    
+class ChecklistRequest(BaseModel):
+    destination: str
+    duration_days: int
+    travel_type: str = "leisure"  # leisure, business, adventure, family
+    activities: Optional[List[str]] = []
+    
+class CurrencyRequest(BaseModel):
+    amount: float
+    from_currency: str = "USD"
+    to_currency: str = "EUR"
+    
+class WeatherRequest(BaseModel):
+    location: str
+    date: str
+    
 class FlightInfo(BaseModel):
     airline: str
     price: str
@@ -681,6 +704,219 @@ async def get_itinerary(itinerary_request: ItineraryRequest):
         itinerary_request.check_out_date
     )
     return AIResponse(itinerary=itinerary)
+
+
+@app.post("/calculate_budget/")
+async def calculate_budget(budget_request: BudgetRequest):
+    """Calculate total trip budget including flights, hotels, and daily expenses."""
+    try:
+        total_cost = 0
+        breakdown = {}
+        
+        # Parse flight price
+        if budget_request.flight_price:
+            flight_price_str = budget_request.flight_price.replace("$", "").replace(",", "").strip()
+            try:
+                flight_price = float(flight_price_str)
+                total_flight = flight_price * budget_request.passengers
+                total_cost += total_flight
+                breakdown["flights"] = {
+                    "per_person": flight_price,
+                    "total": total_flight,
+                    "passengers": budget_request.passengers
+                }
+            except ValueError:
+                breakdown["flights"] = {"error": "Could not parse flight price"}
+        
+        # Parse hotel price
+        if budget_request.hotel_price_per_night:
+            hotel_price_str = budget_request.hotel_price_per_night.replace("$", "").replace(",", "").strip()
+            try:
+                hotel_price = float(hotel_price_str)
+                total_hotel = hotel_price * budget_request.nights
+                total_cost += total_hotel
+                breakdown["hotel"] = {
+                    "per_night": hotel_price,
+                    "nights": budget_request.nights,
+                    "total": total_hotel
+                }
+            except ValueError:
+                breakdown["hotel"] = {"error": "Could not parse hotel price"}
+        
+        # Add daily budget
+        if budget_request.daily_budget:
+            daily_expenses = budget_request.daily_budget * budget_request.nights
+            total_cost += daily_expenses
+            breakdown["daily_expenses"] = {
+                "per_day": budget_request.daily_budget,
+                "days": budget_request.nights,
+                "total": daily_expenses
+            }
+        
+        return {
+            "total_cost": round(total_cost, 2),
+            "currency": budget_request.currency,
+            "breakdown": breakdown,
+            "summary": f"Total trip cost: ${total_cost:,.2f} {budget_request.currency}"
+        }
+    except Exception as e:
+        logger.exception(f"Error calculating budget: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Budget calculation error: {str(e)}")
+
+
+@app.post("/generate_checklist/")
+async def generate_checklist(checklist_request: ChecklistRequest):
+    """Generate AI-powered travel checklist based on destination and trip type."""
+    try:
+        from crewai import Agent, Task, Crew, Process
+        
+        llm_model = initalize_llm()
+        
+        checklist_agent = Agent(
+            role="Travel Checklist Expert",
+            goal="Create a comprehensive, organized travel checklist tailored to the destination and trip type",
+            backstory="Expert travel planner who knows exactly what to pack for any destination and trip type, considering weather, activities, and cultural requirements.",
+            llm=llm_model,
+            verbose=False
+        )
+        
+        activities_text = ", ".join(checklist_request.activities) if checklist_request.activities else "General travel"
+        
+        checklist_task = Task(
+            description=f"""
+            Create a detailed travel checklist for a {checklist_request.duration_days}-day {checklist_request.travel_type} trip to {checklist_request.destination}.
+            
+            Activities planned: {activities_text}
+            
+            The checklist should be organized into clear categories:
+            - **Essential Documents** (passport, tickets, insurance, etc.)
+            - **Clothing** (appropriate for destination, weather, and activities)
+            - **Electronics** (chargers, adapters, devices)
+            - **Toiletries & Personal Care**
+            - **Health & Safety** (medications, first aid, etc.)
+            - **Travel Accessories** (luggage, travel pillows, etc.)
+            - **Activity-Specific Items** (based on planned activities)
+            
+            Format the checklist as a markdown list with checkboxes. Be specific and practical.
+            Consider the destination's climate, culture, and the type of trip ({checklist_request.travel_type}).
+            """,
+            agent=checklist_agent,
+            expected_output="A well-organized travel checklist in markdown format with categories and checkboxes."
+        )
+        
+        checklist_crew = Crew(
+            agents=[checklist_agent],
+            tasks=[checklist_task],
+            process=Process.sequential,
+            verbose=False
+        )
+        
+        crew_results = await asyncio.to_thread(checklist_crew.kickoff)
+        return {"checklist": str(crew_results)}
+    except Exception as e:
+        logger.exception(f"Error generating checklist: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Checklist generation error: {str(e)}")
+
+
+@app.post("/convert_currency/")
+async def convert_currency(currency_request: CurrencyRequest):
+    """Convert currency using SerpAPI."""
+    try:
+        params = {
+            "api_key": SERP_API_KEY,
+            "engine": "google_finance",
+            "q": f"{currency_request.from_currency} to {currency_request.to_currency}",
+        }
+        
+        search_results = await run_search(params)
+        
+        # Try to extract exchange rate
+        exchange_rate = None
+        if search_results:
+            # SerpAPI Google Finance returns different structures
+            conversion_result = search_results.get("conversion") or search_results.get("result")
+            if conversion_result:
+                if isinstance(conversion_result, dict):
+                    exchange_rate = conversion_result.get("exchange_rate") or conversion_result.get("value")
+                elif isinstance(conversion_result, (int, float)):
+                    exchange_rate = conversion_result
+        
+        # Fallback: Use a simple API call structure
+        if exchange_rate is None:
+            # Try alternative approach
+            params = {
+                "api_key": SERP_API_KEY,
+                "engine": "google",
+                "q": f"{currency_request.amount} {currency_request.from_currency} to {currency_request.to_currency}",
+            }
+            search_results = await run_search(params)
+            # Extract from answer box or knowledge graph
+            answer = search_results.get("answer_box") or search_results.get("knowledge_graph", {})
+            if answer:
+                exchange_rate = answer.get("exchange_rate") or answer.get("value")
+        
+        if exchange_rate:
+            converted_amount = currency_request.amount * float(exchange_rate)
+            return {
+                "original_amount": currency_request.amount,
+                "from_currency": currency_request.from_currency,
+                "to_currency": currency_request.to_currency,
+                "exchange_rate": float(exchange_rate),
+                "converted_amount": round(converted_amount, 2),
+                "formatted": f"{currency_request.amount} {currency_request.from_currency} = {converted_amount:.2f} {currency_request.to_currency}"
+            }
+        else:
+            # Fallback to a mock rate if API doesn't return (for development)
+            logger.warning("Could not fetch exchange rate from API, using fallback")
+            # Common exchange rates (approximate)
+            fallback_rates = {
+                "EUR": 0.92, "GBP": 0.79, "JPY": 150.0, "INR": 83.0,
+                "CAD": 1.35, "AUD": 1.52, "CHF": 0.88, "CNY": 7.2
+            }
+            rate = fallback_rates.get(currency_request.to_currency, 1.0)
+            converted_amount = currency_request.amount * rate
+            return {
+                "original_amount": currency_request.amount,
+                "from_currency": currency_request.from_currency,
+                "to_currency": currency_request.to_currency,
+                "exchange_rate": rate,
+                "converted_amount": round(converted_amount, 2),
+                "formatted": f"{currency_request.amount} {currency_request.from_currency} = {converted_amount:.2f} {currency_request.to_currency}",
+                "note": "Using approximate exchange rate"
+            }
+    except Exception as e:
+        logger.exception(f"Error converting currency: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Currency conversion error: {str(e)}")
+
+
+@app.post("/get_weather/")
+async def get_weather(weather_request: WeatherRequest):
+    """Get weather information for a location and date."""
+    try:
+        params = {
+            "api_key": SERP_API_KEY,
+            "engine": "google",
+            "q": f"weather {weather_request.location} on {weather_request.date}",
+        }
+        
+        search_results = await run_search(params)
+        
+        weather_info = {}
+        answer_box = search_results.get("answer_box") or {}
+        knowledge_graph = search_results.get("knowledge_graph") or {}
+        
+        # Extract weather data
+        weather_info["location"] = weather_request.location
+        weather_info["date"] = weather_request.date
+        weather_info["temperature"] = answer_box.get("temperature") or knowledge_graph.get("temperature")
+        weather_info["condition"] = answer_box.get("weather") or knowledge_graph.get("weather")
+        weather_info["humidity"] = answer_box.get("humidity")
+        weather_info["wind"] = answer_box.get("wind")
+        
+        return weather_info
+    except Exception as e:
+        logger.exception(f"Error getting weather: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Weather lookup error: {str(e)}")
 
 if __name__ == "__main__":
     logger.info("Starting Travel Planning API server")
