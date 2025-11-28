@@ -32,6 +32,7 @@ An intelligent travel planning application that helps users find flights, hotels
 - Python 3.8 or higher
 - SerpAPI account and API key ([Get one here](https://serpapi.com/))
 - Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
+- OpenWeatherMap API key ([Get one here](https://openweathermap.org/api) - Free tier available)
 
 ### Installation
 
@@ -63,7 +64,11 @@ An intelligent travel planning application that helps users find flights, hotels
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
    SERP_API_KEY=your_serpapi_key_here
+   OPENWEATHER_API_KEY=your_openweather_api_key_here
    ```
+   
+   **Getting API Keys:**
+   - **OpenWeatherMap**: Sign up at [openweathermap.org](https://openweathermap.org/api) and get your free API key from the dashboard
 
 ### Running the Application
 
@@ -121,6 +126,11 @@ The application requires two API keys:
 2. **Google Gemini API Key**: Used for AI recommendations and itinerary generation
    - Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
    - Add to `.env` as `GEMINI_API_KEY`
+
+3. **OpenWeatherMap API Key**: Used for weather information
+   - Sign up at [openweathermap.org](https://openweathermap.org/api)
+   - Get your free API key from the dashboard (free tier includes 1,000 calls/day)
+   - Add to `.env` as `OPENWEATHER_API_KEY`
 
 ### Backend API URL
 

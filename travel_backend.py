@@ -16,12 +16,13 @@ load_dotenv()
 # Load API Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "gemini_api_key_here")
 SERP_API_KEY = os.getenv("SERP_API_KEY", "serpapi_key_here")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "openweather_api_key_here")
 
 # Initialize Logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-logger.info(f"API Keys loaded: GEMINI_API_KEY={'*' * len(GEMINI_API_KEY) if GEMINI_API_KEY else 'None'}, SERP_API_KEY={'*' * len(SERP_API_KEY) if SERP_API_KEY else 'None'}")
+logger.info(f"API Keys loaded: GEMINI_API_KEY={'*' * len(GEMINI_API_KEY) if GEMINI_API_KEY else 'None'}, SERP_API_KEY={'*' * len(SERP_API_KEY) if SERP_API_KEY else 'None'}, OPENWEATHER_API_KEY={'*' * len(OPENWEATHER_API_KEY) if OPENWEATHER_API_KEY else 'None'}")
 
 def initalize_llm():
     try:
@@ -116,6 +117,23 @@ class AIResponse(BaseModel):
     
 
 app=FastAPI(title="AI Travel Planner", version="1.0")
+
+@app.get("/")
+async def root():
+    """Root endpoint to check if API is running."""
+    return {
+        "message": "AI Travel Planner API is running",
+        "version": "1.0",
+        "endpoints": [
+            "/search_flights/",
+            "/search_hotels/",
+            "/generate_itinerary/",
+            "/calculate_budget/",
+            "/generate_checklist/",
+            "/convert_currency/",
+            "/get_weather/"
+        ]
+    }
 
 
 def parse_flight_data(raw_flights: list, flight_request: FlightRequest) -> List[FlightInfo]:
@@ -889,88 +907,97 @@ async def convert_currency(currency_request: CurrencyRequest):
         raise HTTPException(status_code=500, detail=f"Currency conversion error: {str(e)}")
 
 
+@app.post("/get_weather")
 @app.post("/get_weather/")
 async def get_weather(weather_request: WeatherRequest):
-    """Get weather information for a location and date."""
+    """Get weather information for a location and date using OpenWeatherMap API."""
     try:
+        import aiohttp
+        
+        # Use OpenWeatherMap API
+        base_url = "http://api.openweathermap.org/data/2.5/weather"
+        
+        # Build API URL
         params = {
-            "api_key": SERP_API_KEY,
-            "engine": "google",
-            "q": f"weather {weather_request.location} on {weather_request.date}",
+            "q": weather_request.location,
+            "appid": OPENWEATHER_API_KEY,
+            "units": "imperial"  # Use Fahrenheit, change to "metric" for Celsius
         }
         
-        search_results = await run_search(params)
-        
-        weather_info = {
+        async with aiohttp.ClientSession() as session:
+            # Get weather in Celsius (metric) only
+            params["units"] = "metric"  # Celsius
+            
+            async with session.get(base_url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    # Extract weather information in Celsius
+                    temp_c = round(data.get("main", {}).get("temp", 0))
+                    feels_like_c = round(data.get("main", {}).get("feels_like", 0))
+                    
+                    weather_info = {
+                        "location": data.get("name", weather_request.location),
+                        "country": data.get("sys", {}).get("country", ""),
+                        "date": weather_request.date,
+                        "temperature": temp_c,  # Primary temperature in Celsius
+                        "temperature_c": temp_c,  # Explicit Celsius value
+                        "feels_like": feels_like_c,  # Primary feels like in Celsius
+                        "feels_like_c": feels_like_c,  # Explicit Celsius value
+                        "condition": data.get("weather", [{}])[0].get("description", "").title() if data.get("weather") else None,
+                        "condition_icon": data.get("weather", [{}])[0].get("icon", "") if data.get("weather") else None,
+                        "humidity": f"{data.get('main', {}).get('humidity', 0)}%",
+                        "wind_speed": f"{data.get('wind', {}).get('speed', 0)} km/h",  # Metric
+                        "wind_speed_c": f"{data.get('wind', {}).get('speed', 0)} km/h",
+                        "wind_direction": data.get("wind", {}).get("deg"),
+                        "pressure": f"{data.get('main', {}).get('pressure', 0)} hPa",
+                        "visibility": f"{data.get('visibility', 0) / 1000:.1f} km" if data.get("visibility") else None,
+                        "visibility_c": f"{data.get('visibility', 0) / 1000:.1f} km" if data.get("visibility") else None,
+                        "clouds": f"{data.get('clouds', {}).get('all', 0)}%",
+                        "success": True
+                    }
+                    
+                    # Add weather icon URL if available
+                    if weather_info["condition_icon"]:
+                        weather_info["icon_url"] = f"http://openweathermap.org/img/wn/{weather_info['condition_icon']}@2x.png"
+                    
+                    return weather_info
+                elif response.status == 404:
+                    return {
+                        "location": weather_request.location,
+                        "date": weather_request.date,
+                        "error": "Location not found",
+                        "success": False,
+                        "message": f"Could not find weather information for '{weather_request.location}'. Please check the location name and try again."
+                    }
+                elif response.status == 401:
+                    return {
+                        "location": weather_request.location,
+                        "date": weather_request.date,
+                        "error": "Invalid API key",
+                        "success": False,
+                        "message": "OpenWeatherMap API key is invalid or missing. Please check your .env file."
+                    }
+                else:
+                    error_text = await response.text()
+                    return {
+                        "location": weather_request.location,
+                        "date": weather_request.date,
+                        "error": f"API error: {response.status}",
+                        "success": False,
+                        "message": f"Weather API returned an error. Please try again later."
+                    }
+    except aiohttp.ClientError as e:
+        logger.exception(f"Error connecting to weather API: {str(e)}")
+        return {
             "location": weather_request.location,
             "date": weather_request.date,
-            "temperature": None,
-            "condition": None,
-            "humidity": None,
-            "wind": None,
-            "success": False
+            "error": str(e),
+            "success": False,
+            "message": "Unable to connect to weather service. Please check your internet connection and try again."
         }
-        
-        if search_results:
-            # Try multiple ways to extract weather data
-            answer_box = search_results.get("answer_box") or {}
-            knowledge_graph = search_results.get("knowledge_graph") or {}
-            organic_results = search_results.get("organic_results", [])
-            
-            # Extract temperature - try multiple fields
-            temp = (answer_box.get("temperature") or 
-                   answer_box.get("temp") or
-                   knowledge_graph.get("temperature") or
-                   knowledge_graph.get("temp"))
-            
-            if temp:
-                # Handle different temperature formats
-                if isinstance(temp, str):
-                    # Extract number from string like "72°F" or "22°C"
-                    import re
-                    temp_match = re.search(r'(-?\d+)', temp)
-                    if temp_match:
-                        weather_info["temperature"] = temp_match.group(1)
-                        weather_info["temperature_unit"] = "°F" if "F" in temp.upper() else "°C"
-                else:
-                    weather_info["temperature"] = str(temp)
-                    weather_info["temperature_unit"] = "°F"
-            
-            # Extract condition
-            condition = (answer_box.get("weather") or 
-                        answer_box.get("condition") or
-                        answer_box.get("precipitation") or
-                        knowledge_graph.get("weather") or
-                        knowledge_graph.get("condition"))
-            
-            if condition:
-                weather_info["condition"] = str(condition)
-            
-            # Extract humidity
-            humidity = answer_box.get("humidity") or knowledge_graph.get("humidity")
-            if humidity:
-                weather_info["humidity"] = str(humidity)
-            
-            # Extract wind
-            wind = answer_box.get("wind") or knowledge_graph.get("wind")
-            if wind:
-                weather_info["wind"] = str(wind)
-            
-            # Check if we got at least some data
-            if weather_info["temperature"] or weather_info["condition"]:
-                weather_info["success"] = True
-            else:
-                # Try to extract from organic results
-                if organic_results:
-                    snippet = organic_results[0].get("snippet", "")
-                    if "weather" in snippet.lower() or "°" in snippet:
-                        weather_info["condition"] = snippet[:200]  # Use snippet as fallback
-                        weather_info["success"] = True
-        
-        return weather_info
     except Exception as e:
         logger.exception(f"Error getting weather: {str(e)}")
-        # Return error info instead of raising exception
         return {
             "location": weather_request.location,
             "date": weather_request.date,

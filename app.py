@@ -190,31 +190,70 @@ with tab2:
                             "location": location,
                             "date": check_in_date.strftime("%Y-%m-%d")
                         }
-                        weather_result = make_api_call("/get_weather/", weather_data)
+                        weather_result = make_api_call("/get_weather", weather_data)
                         
                         if weather_result:
                             if weather_result.get("success") or weather_result.get("temperature") or weather_result.get("condition"):
                                 # Display weather in a prominent box
+                                st.markdown("### 🌤️ Current Weather")
+                                
+                                # Weather icon and main info
+                                weather_main_col1, weather_main_col2 = st.columns([1, 3])
+                                with weather_main_col1:
+                                    if weather_result.get("icon_url"):
+                                        st.image(weather_result.get("icon_url"), width=100)
+                                with weather_main_col2:
+                                    # Display only Celsius as primary temperature
+                                    temp_c = weather_result.get('temperature_c') or weather_result.get('temperature')
+                                    if temp_c is not None:
+                                        # Handle both number and string formats
+                                        if isinstance(temp_c, (int, float)):
+                                            temp_display = f"{int(temp_c)}°C"
+                                        else:
+                                            temp_display = f"{temp_c}°C" if not str(temp_c).endswith('°C') else str(temp_c)
+                                        
+                                        st.metric(
+                                            "Temperature",
+                                            temp_display,
+                                            help="Current temperature in Celsius"
+                                        )
+                                        
+                                        feels_c = weather_result.get('feels_like_c') or weather_result.get('feels_like')
+                                        if feels_c is not None:
+                                            if isinstance(feels_c, (int, float)):
+                                                feels_display = f"{int(feels_c)}°C"
+                                            else:
+                                                feels_display = f"{feels_c}°C" if not str(feels_c).endswith('°C') else str(feels_c)
+                                            st.caption(f"Feels like: {feels_display}")
+                                
+                                # Weather details in columns
                                 weather_col1, weather_col2, weather_col3 = st.columns(3)
                                 with weather_col1:
-                                    if weather_result.get("temperature"):
-                                        temp_unit = weather_result.get("temperature_unit", "°F")
-                                        st.metric("Temperature", f"{weather_result.get('temperature')}{temp_unit}")
-                                with weather_col2:
                                     if weather_result.get("condition"):
-                                        st.metric("Condition", weather_result.get("condition"))
-                                with weather_col3:
+                                        st.write(f"**Condition:** {weather_result.get('condition')}")
                                     if weather_result.get("humidity"):
-                                        st.metric("Humidity", weather_result.get("humidity"))
+                                        st.write(f"**Humidity:** {weather_result.get('humidity')}")
+                                with weather_col2:
+                                    if weather_result.get("wind_speed"):
+                                        # Show wind speed in km/h (metric)
+                                        wind_info = weather_result.get("wind_speed_c") or weather_result.get("wind_speed")
+                                        if weather_result.get("wind_direction"):
+                                            wind_info += f" ({weather_result.get('wind_direction')}°)"
+                                        st.write(f"**Wind:** {wind_info}")
+                                    if weather_result.get("pressure"):
+                                        st.write(f"**Pressure:** {weather_result.get('pressure')}")
+                                with weather_col3:
+                                    if weather_result.get("clouds"):
+                                        st.write(f"**Clouds:** {weather_result.get('clouds')}")
+                                    if weather_result.get("visibility"):
+                                        vis_info = weather_result.get("visibility")
+                                        st.write(f"**Visibility:** {vis_info}")
                                 
-                                # Additional weather details
-                                weather_details = []
-                                if weather_result.get("wind"):
-                                    weather_details.append(f"Wind: {weather_result.get('wind')}")
-                                if weather_result.get("location"):
-                                    weather_details.append(f"Location: {weather_result.get('location')}")
-                                if weather_details:
-                                    st.caption(" | ".join(weather_details))
+                                # Location info
+                                location_info = weather_result.get("location", location)
+                                if weather_result.get("country"):
+                                    location_info += f", {weather_result.get('country')}"
+                                st.caption(f"📍 {location_info}")
                             elif weather_result.get("error"):
                                 st.warning(f"⚠️ Weather information unavailable: {weather_result.get('message', 'Please try again later.')}")
                             else:
@@ -494,73 +533,106 @@ with tab7:
                 }
                 
                 with st.spinner("Fetching weather information..."):
-                    weather_result = make_api_call("/get_weather/", weather_data)
+                    weather_result = make_api_call("/get_weather", weather_data)
                 
                 if weather_result:
                     if weather_result.get("success") or weather_result.get("temperature") or weather_result.get("condition"):
-                        st.success(f"🌤️ Weather for {weather_location}")
+                        # Header with icon
+                        header_col1, header_col2 = st.columns([1, 4])
+                        with header_col1:
+                            if weather_result.get("icon_url"):
+                                st.image(weather_result.get("icon_url"), width=80)
+                        with header_col2:
+                            location_name = weather_result.get("location", weather_location)
+                            if weather_result.get("country"):
+                                location_name += f", {weather_result.get('country')}"
+                            st.success(f"🌤️ Weather for {location_name}")
+                        
                         st.markdown("---")
                         
-                        # Display weather in columns
-                        col_temp, col_cond, col_hum = st.columns(3)
+                        # Main temperature display with both units
+                        temp_col1, temp_col2, temp_col3 = st.columns(3)
                         
-                        with col_temp:
-                            if weather_result.get("temperature"):
-                                temp_unit = weather_result.get("temperature_unit", "°F")
+                        with temp_col1:
+                            # Display only Celsius as primary temperature
+                            temp_c = weather_result.get('temperature_c') or weather_result.get('temperature')
+                            if temp_c is not None:
+                                # Handle both number and string formats
+                                if isinstance(temp_c, (int, float)):
+                                    temp_display = f"{int(temp_c)}°C"
+                                else:
+                                    temp_display = f"{temp_c}°C" if not str(temp_c).endswith('°C') else str(temp_c)
+                                
                                 st.metric(
                                     "Temperature",
-                                    f"{weather_result.get('temperature')}{temp_unit}",
-                                    help="Current temperature"
+                                    temp_display,
+                                    help="Current temperature in Celsius"
                                 )
-                            else:
-                                st.metric("Temperature", "N/A")
+                                
+                                feels_c = weather_result.get('feels_like_c') or weather_result.get('feels_like')
+                                if feels_c is not None:
+                                    if isinstance(feels_c, (int, float)):
+                                        feels_display = f"{int(feels_c)}°C"
+                                    else:
+                                        feels_display = f"{feels_c}°C" if not str(feels_c).endswith('°C') else str(feels_c)
+                                    st.caption(f"Feels like: {feels_display}")
                         
-                        with col_cond:
+                        with temp_col2:
                             if weather_result.get("condition"):
                                 st.metric(
                                     "Condition",
                                     weather_result.get("condition"),
                                     help="Weather condition"
                                 )
-                            else:
-                                st.metric("Condition", "N/A")
                         
-                        with col_hum:
+                        with temp_col3:
                             if weather_result.get("humidity"):
                                 st.metric(
                                     "Humidity",
                                     weather_result.get("humidity"),
                                     help="Humidity level"
                                 )
-                            else:
-                                st.metric("Humidity", "N/A")
                         
-                        # Additional details
+                        # Additional weather details
                         st.markdown("---")
+                        st.subheader("📊 Detailed Information")
                         details_col1, details_col2 = st.columns(2)
                         
                         with details_col1:
                             st.write("**Location:**", weather_result.get("location", weather_location))
+                            if weather_result.get("country"):
+                                st.write("**Country:**", weather_result.get("country"))
                             st.write("**Date:**", weather_result.get("date", weather_date.strftime("%Y-%m-%d")))
+                            if weather_result.get("wind_speed"):
+                                # Show wind speed in km/h (metric)
+                                wind_info = weather_result.get("wind_speed_c") or weather_result.get("wind_speed")
+                                if weather_result.get("wind_direction"):
+                                    wind_info += f" (Direction: {weather_result.get('wind_direction')}°)"
+                                st.write("**Wind:**", wind_info)
                         
                         with details_col2:
-                            if weather_result.get("wind"):
-                                st.write("**Wind:**", weather_result.get("wind"))
-                            if weather_result.get("humidity"):
-                                st.write("**Humidity:**", weather_result.get("humidity"))
+                            if weather_result.get("pressure"):
+                                st.write("**Pressure:**", weather_result.get("pressure"))
+                            if weather_result.get("clouds"):
+                                st.write("**Cloud Coverage:**", weather_result.get("clouds"))
+                            if weather_result.get("visibility"):
+                                # Show visibility in km (metric)
+                                vis_info = weather_result.get("visibility_c") or weather_result.get("visibility")
+                                st.write("**Visibility:**", vis_info)
                         
-                        # Weather summary box
+                        # Weather summary box with both units
                         weather_summary = []
                         if weather_result.get("temperature"):
-                            temp_unit = weather_result.get("temperature_unit", "°F")
-                            weather_summary.append(f"Temperature: {weather_result.get('temperature')}{temp_unit}")
+                            weather_summary.append(f"🌡️ {weather_result.get('temperature')}")
+                        elif weather_result.get("temperature_f") and weather_result.get("temperature_c"):
+                            weather_summary.append(f"🌡️ {weather_result.get('temperature_f')}°F / {weather_result.get('temperature_c')}°C")
                         if weather_result.get("condition"):
-                            weather_summary.append(f"Condition: {weather_result.get('condition')}")
-                        if weather_result.get("wind"):
-                            weather_summary.append(f"Wind: {weather_result.get('wind')}")
+                            weather_summary.append(f"☁️ {weather_result.get('condition')}")
+                        if weather_result.get("wind_speed"):
+                            weather_summary.append(f"💨 {weather_result.get('wind_speed')}")
                         
                         if weather_summary:
-                            st.info("📊 **Weather Summary:** " + " | ".join(weather_summary))
+                            st.info("📊 **Quick Summary:** " + " | ".join(weather_summary))
                     elif weather_result.get("error"):
                         st.error(f"❌ Error: {weather_result.get('message', 'Unable to fetch weather information.')}")
                     else:
